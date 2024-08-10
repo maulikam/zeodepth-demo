@@ -30,6 +30,7 @@ zoe.eval()
 def index():
     return render_template('index.html')
 
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     logging.debug("Upload endpoint called")
@@ -51,11 +52,14 @@ def upload_file():
         # Convert the depth map to a numpy array
         depth_np = np.array(predicted_depth)
 
+        # Convert from meters to feet
+        depth_np_feet = depth_np * 3.28084
+
         # Plot and save the depth map with Matplotlib
         fig, ax = plt.subplots()
-        cax = ax.imshow(depth_np, cmap='gray')
-        fig.colorbar(cax, ax=ax, label='Depth value')
-        
+        cax = ax.imshow(depth_np_feet, cmap='gray')
+        fig.colorbar(cax, ax=ax, label='Depth value (feet)')
+
         # Save the plot to a BytesIO object
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
@@ -67,6 +71,7 @@ def upload_file():
     except Exception as e:
         logging.error(f"Error processing image: {e}")
         return jsonify({'error': f'Error processing image: {e}'}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
