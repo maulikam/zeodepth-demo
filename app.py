@@ -1,14 +1,17 @@
 import os
 import numpy as np
 from PIL import Image
-import torch 
-from flask import Flask, request, jsonify, render_template
+import torch
+from flask import Flask, request, jsonify, render_template, send_file
 from flask_cors import CORS
 import io
 import base64
 import logging
-import math
-import random
+import matplotlib
+import matplotlib.pyplot as plt
+
+# Use the 'Agg' backend for headless rendering (no GUI)
+matplotlib.use('Agg')
 
 # Set up Flask app
 app = Flask(__name__)
@@ -20,6 +23,9 @@ logging.basicConfig(level=logging.DEBUG)
 # Load the ZoeDepth model
 zoe = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
 
+# Set the model to evaluation mode explicitly
+zoe.eval()
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -27,18 +33,11 @@ def index():
 @app.route('/upload', methods=['POST'])
 def upload_file():
     logging.debug("Upload endpoint called")
-    
-    if 'file' not in request.files:
-        logging.error("No file part in the request")
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        logging.error("No selected file")
-        return jsonify({'error': 'No selected file'}), 400
 
     try:
-        image = Image.open(file).convert("RGB")  # Convert image to RGB
+        # Read raw image data from the request
+        image_data = request.data
+        image = Image.open(io.BytesIO(image_data)).convert("RGB")  # Convert image to RGB
         logging.debug(f"Image opened successfully: {image}")
     except Exception as e:
         logging.error(f"Error opening image: {e}")
@@ -49,17 +48,22 @@ def upload_file():
         predicted_depth = zoe.infer_pil(image, pad_input=False)  # Better 'metric' accuracy
         logging.debug(f"Depth estimation completed: {predicted_depth}")
 
-        # Convert the depth map to a numpy array and normalize it
+        # Convert the depth map to a numpy array
         depth_np = np.array(predicted_depth)
-        depth_np_normalized = (depth_np - np.min(depth_np)) / (np.max(depth_np) - np.min(depth_np))
-        depth_image = Image.fromarray((depth_np_normalized * 255).astype(np.uint8))
-        
-        # Convert the depth image to base64
-        buffered = io.BytesIO()
-        depth_image.save(buffered, format="PNG")
-        depth_image_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        return jsonify({'depth_image': depth_image_str})
+        # Plot and save the depth map with Matplotlib
+        fig, ax = plt.subplots()
+        cax = ax.imshow(depth_np, cmap='gray')
+        fig.colorbar(cax, ax=ax, label='Depth value')
+        
+        # Save the plot to a BytesIO object
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        plt.close(fig)  # Close the figure to free up memory
+
+        return send_file(buf, mimetype='image/png', as_attachment=True, download_name='depth_map.png')
+
     except Exception as e:
         logging.error(f"Error processing image: {e}")
         return jsonify({'error': f'Error processing image: {e}'}), 500

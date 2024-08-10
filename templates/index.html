@@ -10,16 +10,26 @@
             max-width: 100%;
             height: auto;
             margin-bottom: 15px;
+            position: relative;
         }
         #depth-output {
             display: none;
             margin-top: 15px;
         }
+        #depth-info {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px;
+            border-radius: 3px;
+            display: none;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="text-center mt-5">Depth Estimation</h1>
+        <h1 class="text-center mt-5">Interactive Depth Estimation</h1>
 
         <div class="d-flex justify-content-center mt-4">
             <button id="upload-btn" class="btn btn-success">Upload or Capture Image</button>
@@ -27,9 +37,9 @@
 
         <input type="file" id="image-input" accept="image/*" capture="environment" class="form-control mt-3" style="display: none;">
 
-        <div class="mt-4">
-            <img id="uploaded-image" class="image-container" alt="Uploaded Image">
-            <img id="depth-output" class="image-container" alt="Depth Map Output">
+        <div class="image-container mt-4">
+            <canvas id="depth-output" class="image-container"></canvas>
+            <div id="depth-info"></div>
         </div>
 
         <div id="loading" class="text-center mt-4" style="display: none;">
@@ -45,10 +55,13 @@
     <script>
         const uploadBtn = document.getElementById('upload-btn');
         const imageInput = document.getElementById('image-input');
-        const uploadedImage = document.getElementById('uploaded-image');
         const depthOutput = document.getElementById('depth-output');
+        const depthInfo = document.getElementById('depth-info');
         const loading = document.getElementById('loading');
         const errorMessage = document.getElementById('error-message');
+
+        let depthData = null;
+        let depthWidth, depthHeight;
 
         uploadBtn.addEventListener('click', () => {
             imageInput.click();
@@ -59,43 +72,70 @@
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
-                    uploadedImage.src = e.target.result;
-                    uploadedImage.style.display = 'block';
-                    uploadImage(e.target.result);
+                    uploadImage(dataURItoBlob(e.target.result));
                 };
                 reader.readAsDataURL(file);
             }
         });
 
-        function uploadImage(imageData) {
+        function uploadImage(imageBlob) {
             loading.style.display = 'block';
             depthOutput.style.display = 'none';
             errorMessage.style.display = 'none';
 
             fetch('/upload', {
                 method: 'POST',
-                body: dataURItoBlob(imageData),
+                body: imageBlob,
                 headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/octet-stream'
+                    'Accept': 'image/png'
                 }
             })
-            .then(response => response.json())
-            .then(data => {
-                loading.style.display = 'none';
-                if (data.error) {
-                    errorMessage.style.display = 'block';
-                    errorMessage.textContent = data.error;
-                } else {
-                    depthOutput.src = 'data:image/png;base64,' + data.depth_image;
-                    depthOutput.style.display = 'block';
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to process image');
                 }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = URL.createObjectURL(blob);
+                displayDepthImage(url);
             })
             .catch(error => {
-                loading.style.display = 'none';
                 errorMessage.style.display = 'block';
                 errorMessage.textContent = 'Error: ' + error.message;
+            })
+            .finally(() => {
+                loading.style.display = 'none';
             });
+        }
+
+        function displayDepthImage(url) {
+            const img = new Image();
+            img.src = url;
+            img.onload = () => {
+                depthWidth = img.width;
+                depthHeight = img.height;
+                depthOutput.width = depthWidth;
+                depthOutput.height = depthHeight;
+                const ctx = depthOutput.getContext('2d');
+                ctx.drawImage(img, 0, 0, depthWidth, depthHeight);
+                depthData = ctx.getImageData(0, 0, depthWidth, depthHeight).data;
+                depthOutput.style.display = 'block';
+                depthOutput.addEventListener('mousemove', showDepthValue);
+            };
+        }
+
+        function showDepthValue(event) {
+            const rect = depthOutput.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            const index = (y * depthWidth + x) * 4;
+            const depthValue = depthData[index];  // Assuming depth value is stored in the red channel
+
+            depthInfo.style.left = `${event.clientX + 10}px`;
+            depthInfo.style.top = `${event.clientY + 10}px`;
+            depthInfo.textContent = `Depth: ${depthValue}`;
+            depthInfo.style.display = 'block';
         }
 
         function dataURItoBlob(dataURI) {
