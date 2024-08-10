@@ -62,6 +62,7 @@
 
         let depthData = null;
         let depthWidth, depthHeight;
+        let imageData = null;
 
         uploadBtn.addEventListener('click', () => {
             imageInput.click();
@@ -120,6 +121,7 @@
                 const ctx = depthOutput.getContext('2d');
                 ctx.drawImage(img, 0, 0, depthWidth, depthHeight);
                 depthData = ctx.getImageData(0, 0, depthWidth, depthHeight).data;
+                imageData = ctx.getImageData(0, 0, depthWidth, depthHeight);  // Store the image data
                 depthOutput.style.display = 'block';
                 depthOutput.addEventListener('mousemove', showDepthValue);
             };
@@ -132,6 +134,26 @@
             const index = (y * depthWidth + x) * 4;
             const depthValue = depthData[index];  // Assuming depth value is stored in the red channel
 
+            const ctx = depthOutput.getContext('2d');
+            ctx.putImageData(imageData, 0, 0);  // Restore the original image
+
+            // Draw the crosshair lines
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+
+            // Vertical line
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, depthHeight);
+            ctx.stroke();
+
+            // Horizontal line
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(depthWidth, y);
+            ctx.stroke();
+
+            // Update and show depth information
             depthInfo.style.left = `${event.clientX + 10}px`;
             depthInfo.style.top = `${event.clientY + 10}px`;
             depthInfo.textContent = `Depth: ${depthValue}`;
