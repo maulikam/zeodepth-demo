@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Depth Estimation</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .image-container {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 15px;
+        }
+        #depth-output {
+            display: none;
+            margin-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mt-5">Depth Estimation</h1>
+
+        <div class="d-flex justify-content-center mt-4">
+            <button id="upload-btn" class="btn btn-success">Upload or Capture Image</button>
+        </div>
+
+        <input type="file" id="image-input" accept="image/*" capture="environment" class="form-control mt-3" style="display: none;">
+
+        <div class="mt-4">
+            <img id="uploaded-image" class="image-container" alt="Uploaded Image">
+            <img id="depth-output" class="image-container" alt="Depth Map Output">
+        </div>
+
+        <div id="loading" class="text-center mt-4" style="display: none;">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Processing image, please wait...</p>
+        </div>
+
+        <div id="error-message" class="alert alert-danger mt-4" style="display: none;"></div>
+    </div>
+
+    <script>
+        const uploadBtn = document.getElementById('upload-btn');
+        const imageInput = document.getElementById('image-input');
+        const uploadedImage = document.getElementById('uploaded-image');
+        const depthOutput = document.getElementById('depth-output');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('error-message');
+
+        uploadBtn.addEventListener('click', () => {
+            imageInput.click();
+        });
+
+        imageInput.addEventListener('change', () => {
+            const file = imageInput.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    uploadedImage.src = e.target.result;
+                    uploadedImage.style.display = 'block';
+                    uploadImage(e.target.result);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function uploadImage(imageData) {
+            loading.style.display = 'block';
+            depthOutput.style.display = 'none';
+            errorMessage.style.display = 'none';
+
+            fetch('/upload', {
+                method: 'POST',
+                body: dataURItoBlob(imageData),
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/octet-stream'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                loading.style.display = 'none';
+                if (data.error) {
+                    errorMessage.style.display = 'block';
+                    errorMessage.textContent = data.error;
+                } else {
+                    depthOutput.src = 'data:image/png;base64,' + data.depth_image;
+                    depthOutput.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                loading.style.display = 'none';
+                errorMessage.style.display = 'block';
+                errorMessage.textContent = 'Error: ' + error.message;
+            });
+        }
+
+        function dataURItoBlob(dataURI) {
+            const byteString = atob(dataURI.split(',')[1]);
+            const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) {
+                ia[i] = byteString.charCodeAt(i);
+            }
+            return new Blob([ab], { type: mimeString });
+        }
+    </script>
+</body>
+</html>
