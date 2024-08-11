@@ -2,8 +2,9 @@ import os
 import numpy as np
 from PIL import Image
 import torch
-from flask import Flask, request, jsonify, render_template, send_file
-from flask_cors import CORS
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import io
 import base64
 import logging
@@ -13,9 +14,17 @@ import matplotlib.pyplot as plt
 # Use the 'Agg' backend for headless rendering (no GUI)
 matplotlib.use('Agg')
 
-# Set up Flask app
-app = Flask(__name__)
-CORS(app)
+# Set up FastAPI app
+app = FastAPI()
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust as needed
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -26,23 +35,22 @@ zoe = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
 # Set the model to evaluation mode explicitly
 zoe.eval()
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the ZoeDepth API"}
 
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
     logging.debug("Upload endpoint called")
 
     try:
-        # Read raw image data from the request
-        image_data = request.data
+        # Read raw image data from the uploaded file
+        image_data = await file.read()
         image = Image.open(io.BytesIO(image_data)).convert("RGB")  # Convert image to RGB
         logging.debug(f"Image opened successfully: {image}")
     except Exception as e:
         logging.error(f"Error opening image: {e}")
-        return jsonify({'error': 'Invalid image file'}), 400
+        raise HTTPException(status_code=400, detail="Invalid image file")
 
     try:
         # Perform depth estimation
@@ -66,12 +74,12 @@ def upload_file():
         buf.seek(0)
         plt.close(fig)  # Close the figure to free up memory
 
-        return send_file(buf, mimetype='image/png', as_attachment=True, download_name='depth_map.png')
+        return StreamingResponse(buf, media_type="image/png", headers={"Content-Disposition": "attachment; filename=depth_map.png"})
 
     except Exception as e:
         logging.error(f"Error processing image: {e}")
-        return jsonify({'error': f'Error processing image: {e}'}), 500
+        raise HTTPException(status_code=500, detail=f"Error processing image: {e}")
 
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5000)
