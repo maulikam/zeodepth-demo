@@ -1,15 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import * as THREE from 'three';
+import pako from 'pako';
+import config from '@/config';
 
 export default function Home() {
-  const [depthOutput, setDepthOutput] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [uploadedImageUrl, setUploadedImageUrl] = useState(null);
   const [depthData, setDepthData] = useState(null);
-  const [imageData, setImageData] = useState(null);
   const [depthWidth, setDepthWidth] = useState(0);
   const [depthHeight, setDepthHeight] = useState(0);
+
+  useEffect(() => {
+    if (depthData) {
+      console.log('Depth Data:', depthData);  // Log depth data to console
+      renderDepthMap();
+    }
+  }, [depthData]);
 
   const handleImageUpload = async (event) => {
     const file = event.target.files[0];
@@ -17,85 +26,81 @@ export default function Home() {
 
     setLoading(true);
     setErrorMessage('');
+    setDepthData(null);
+    setUploadedImageUrl(URL.createObjectURL(file));
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('http://localhost:5000/upload', {
+      const response = await fetch(`${config.backendUrl}/upload`, {
         method: 'POST',
-        body: formData,
         headers: {
-          Accept: 'image/png',
+          'Content-Type': 'application/octet-stream',
         },
+        body: await file.arrayBuffer(),
       });
 
       if (!response.ok) {
         throw new Error('Failed to process image');
       }
 
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      displayDepthImage(url);
+      const responseData = await response.json();
+      const compressedDepthBase64 = responseData.depth_values;
+      const width = responseData.width;
+      const height = responseData.height;
+
+      // Decode base64 and decompress the depth data
+      const compressedDepth = Uint8Array.from(atob(compressedDepthBase64), c => c.charCodeAt(0));
+      const decompressedDepth = pako.inflate(compressedDepth);
+
+      // Convert decompressed data back to a Float32Array
+      const depthArray = new Float32Array(decompressedDepth.buffer);
+
+      console.log('Decompressed Depth Data:', depthArray);  // Log decompressed depth data
+
+      setDepthData(depthArray);
+      setDepthWidth(width);
+      setDepthHeight(height);
     } catch (error) {
+      console.error('Error:', error.message);  // Log error to console
       setErrorMessage('Error: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const displayDepthImage = (url) => {
-    const img = new Image();
-    img.src = url;
-    img.onload = () => {
-      setDepthWidth(img.width);
-      setDepthHeight(img.height);
-      const canvas = document.getElementById('depth-output');
-      const ctx = canvas.getContext('2d');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0, img.width, img.height);
-      const depthImgData = ctx.getImageData(0, 0, img.width, img.height).data;
-      setDepthData(depthImgData);
-      setImageData(ctx.getImageData(0, 0, img.width, img.height));
-      canvas.style.display = 'block';
-      canvas.addEventListener('mousemove', showDepthValue);
+  const renderDepthMap = () => {
+    console.log('Rendering depth map with dimensions:', depthWidth, depthHeight);  // Log rendering process
+
+    // Create a Three.js scene
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, depthWidth / depthHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(depthWidth, depthHeight);
+    document.getElementById('depth-render').appendChild(renderer.domElement);
+
+    // Create a plane and apply depth data as height map
+    const geometry = new THREE.PlaneGeometry(depthWidth, depthHeight, depthWidth - 1, depthHeight - 1);
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
+
+    const plane = new THREE.Mesh(geometry, material);
+    scene.add(plane);
+
+    // Map depth data to geometry vertices
+    for (let y = 0; y < depthHeight; y++) {
+      for (let x = 0; x < depthWidth; x++) {
+        const index = y * depthWidth + x;
+        geometry.attributes.position.setZ(index, depthData[index]);
+      }
+    }
+
+    camera.position.z = 100;
+    camera.position.y = 100;
+    camera.rotation.x = -Math.PI / 4;
+
+    const animate = function () {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
     };
-  };
-
-  const showDepthValue = (event) => {
-    const canvas = document.getElementById('depth-output');
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const index = (y * depthWidth + x) * 4;
-    const depthValue = depthData[index]; // Assuming depth value is stored in the red channel
-
-    const ctx = canvas.getContext('2d');
-    ctx.putImageData(imageData, 0, 0); // Restore the original image
-
-    // Draw the crosshair lines
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 1;
-
-    // Vertical line
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, depthHeight);
-    ctx.stroke();
-
-    // Horizontal line
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(depthWidth, y);
-    ctx.stroke();
-
-    // Update and show depth information
-    const depthInfo = document.getElementById('depth-info');
-    depthInfo.style.left = `${event.clientX + 10}px`;
-    depthInfo.style.top = `${event.clientY + 10}px`;
-    depthInfo.textContent = `Depth: ${depthValue}`;
-    depthInfo.style.display = 'block';
+    animate();
   };
 
   return (
@@ -116,11 +121,11 @@ export default function Home() {
       </div>
 
       {loading && (
-        <div className="text-center mt-4">
-          <div className="spinner-border" role="status">
-            <span className="visually-hidden">Loading...</span>
+        <div className="flex justify-center mt-4">
+          <div className="flex flex-col items-center">
+            <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-32 w-32 mb-4"></div>
+            <p className="text-lg font-semibold">Processing image, please wait...</p>
           </div>
-          <p>Processing image, please wait...</p>
         </div>
       )}
 
@@ -128,14 +133,13 @@ export default function Home() {
         <div className="alert alert-danger mt-4 text-red-500">{errorMessage}</div>
       )}
 
-      <div className="image-container mt-4 relative">
-        <canvas id="depth-output" className="w-full h-auto" style={{ display: 'none' }}></canvas>
-        <div
-          id="depth-info"
-          className="absolute bg-black text-white p-1 rounded pointer-events-none"
-          style={{ display: 'none' }}
-        ></div>
-      </div>
+      {uploadedImageUrl && (
+        <div className="image-container mt-4 relative">
+          <img id="uploaded-image" src={uploadedImageUrl} alt="Uploaded" className="w-full h-auto" />
+        </div>
+      )}
+
+      <div id="depth-render" className="w-full h-auto mt-6"></div>
     </div>
   );
 }
