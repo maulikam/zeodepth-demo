@@ -7,8 +7,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import io
 import logging
-import gzip
 import base64
+import matplotlib.pyplot as plt
 
 # Set up FastAPI app
 app = FastAPI()
@@ -57,21 +57,30 @@ async def upload_file(request: Request):
         depth_np = np.array(predicted_depth)
 
         # Convert from meters to feet
-        depth_np_feet = np.round(depth_np * 3.28084, 4)
-        logging.debug(f"Rounded Depth Value: {depth_np_feet[:10]}")
+        depth_np_feet = depth_np * 3.28084
 
-        # Compress the NumPy array directly
-        # compressed_depth = gzip.compress(depth_np_feet.tobytes())
-        #
-        # # Encode to base64 to safely transfer over HTTP
-        compressed_depth_base64 = base64.b64encode(depth_np_feet).decode('utf-8')
-        logging.debug(f"Rounded Depth Value: {compressed_depth_base64[:10]}")
-        #
-        # logging.debug(f"compressed depth size: {len(compressed_depth) / (1024 * 1024):.2f} MB")
-        logging.debug(f"compressed depth base 64 size: {len(compressed_depth_base64) / (1024 * 1024):.2f} MB")
+        # Normalize the depth values to the range 0-255 and convert to uint8
+        depth_min, depth_max = depth_np_feet.min(), depth_np_feet.max()
+        depth_np_normalized = ((depth_np_feet - depth_min) / (depth_max - depth_min) * 255).astype(np.uint8)
+        logging.debug(f"Normalized Depth Value: {depth_np_normalized[:10]}")
 
-        # Return the compressed depth data as base64-encoded JSON
-        return JSONResponse(content={"depth_values": depth_np_feet, "width": depth_np_feet.shape[1], "height": depth_np_feet.shape[0]})
+        # Encode to base64
+        depth_base64 = base64.b64encode(depth_np_normalized).decode('utf-8')
+
+        logging.debug(f"Base64 encoded depth size: {len(depth_base64) / (1024 * 1024):.2f} MB")
+
+        # Convert depth_min and depth_max to standard Python floats
+        depth_min = float(depth_min)
+        depth_max = float(depth_max)
+
+        # Return the base64-encoded depth data as JSON
+        return JSONResponse(content={
+            "depth_values": depth_base64,
+            "width": depth_np_normalized.shape[1],
+            "height": depth_np_normalized.shape[0],
+            "depth_min": depth_min,
+            "depth_max": depth_max
+        })
 
     except Exception as e:
         logging.error(f"Error processing image: {e}")

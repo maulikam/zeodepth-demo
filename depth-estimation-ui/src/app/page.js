@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import * as THREE from 'three';
-import pako from 'pako';
 import config from '@/config';
 
 export default function Home() {
@@ -12,11 +10,18 @@ export default function Home() {
   const [depthData, setDepthData] = useState(null);
   const [depthWidth, setDepthWidth] = useState(0);
   const [depthHeight, setDepthHeight] = useState(0);
+  const [depthMin, setDepthMin] = useState(0);
+  const [depthMax, setDepthMax] = useState(255);  // Default max if not provided
+  const [depthValue, setDepthValue] = useState(null);
+  const [crosshairPosition, setCrosshairPosition] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
-    if (depthData) {
-      console.log('Depth Data:', depthData);  // Log depth data to console
-      renderDepthMap();
+    const imageElement = document.getElementById('uploaded-image');
+    if (imageElement && depthData) {
+      imageElement.addEventListener('mousemove', handleMouseMove);
+      return () => {
+        imageElement.removeEventListener('mousemove', handleMouseMove);
+      };
     }
   }, [depthData]);
 
@@ -46,61 +51,54 @@ export default function Home() {
       const compressedDepthBase64 = responseData.depth_values;
       const width = responseData.width;
       const height = responseData.height;
+      const depthMin = responseData.depth_min;
+      const depthMax = responseData.depth_max;
 
-      // Decode base64 and decompress the depth data
-      const compressedDepth = Uint8Array.from(atob(compressedDepthBase64), c => c.charCodeAt(0));
-      const decompressedDepth = pako.inflate(compressedDepth);
+      // Decode base64
+      const binaryString = atob(compressedDepthBase64);
+      const depthArray = new Uint8Array(binaryString.length);
 
-      // Convert decompressed data back to a Float32Array
-      const depthArray = new Float32Array(decompressedDepth.buffer);
+      for (let i = 0; i < binaryString.length; i++) {
+        depthArray[i] = binaryString.charCodeAt(i);
+      }
 
-      console.log('Decompressed Depth Data:', depthArray);  // Log decompressed depth data
+      // Debugging information
+      console.log('Response Metadata:', responseData);
+      console.log('Image Dimensions:', `Width: ${width}, Height: ${height}`);
+      console.log('Depth Array Length:', depthArray.length);
+      console.log('First 100 Depth Values:', depthArray.slice(0, 100)); // Print the first 100 depth values for inspection
 
       setDepthData(depthArray);
       setDepthWidth(width);
       setDepthHeight(height);
+      setDepthMin(depthMin);
+      setDepthMax(depthMax);
     } catch (error) {
-      console.error('Error:', error.message);  // Log error to console
+      console.error('Error:', error.message);
       setErrorMessage('Error: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderDepthMap = () => {
-    console.log('Rendering depth map with dimensions:', depthWidth, depthHeight);  // Log rendering process
+  const handleMouseMove = (event) => {
+    const rect = event.target.getBoundingClientRect();
+    const x = Math.floor(((event.clientX - rect.left) / rect.width) * depthWidth);
+    const y = Math.floor(((event.clientY - rect.top) / rect.height) * depthHeight);
 
-    // Create a Three.js scene
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, depthWidth / depthHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(depthWidth, depthHeight);
-    document.getElementById('depth-render').appendChild(renderer.domElement);
+    setCrosshairPosition({ x: event.clientX - rect.left, y: event.clientY - rect.top });
 
-    // Create a plane and apply depth data as height map
-    const geometry = new THREE.PlaneGeometry(depthWidth, depthHeight, depthWidth - 1, depthHeight - 1);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
+    if (depthData && x >= 0 && y >= 0 && x < depthWidth && y < depthHeight) {
+      const index = y * depthWidth + x;
+      const normalizedDepthValue = depthData[index]; // Normalized depth value (0-255)
 
-    const plane = new THREE.Mesh(geometry, material);
-    scene.add(plane);
+      // Reverse normalization to get the actual depth value in feet
+      const depthValue = (normalizedDepthValue / 255) * (depthMax - depthMin) + depthMin;
 
-    // Map depth data to geometry vertices
-    for (let y = 0; y < depthHeight; y++) {
-      for (let x = 0; x < depthWidth; x++) {
-        const index = y * depthWidth + x;
-        geometry.attributes.position.setZ(index, depthData[index]);
-      }
+      setDepthValue(depthValue);
+    } else {
+      setDepthValue(null);
     }
-
-    camera.position.z = 100;
-    camera.position.y = 100;
-    camera.rotation.x = -Math.PI / 4;
-
-    const animate = function () {
-      requestAnimationFrame(animate);
-      renderer.render(scene, camera);
-    };
-    animate();
   };
 
   return (
@@ -136,10 +134,35 @@ export default function Home() {
       {uploadedImageUrl && (
         <div className="image-container mt-4 relative">
           <img id="uploaded-image" src={uploadedImageUrl} alt="Uploaded" className="w-full h-auto" />
+          <div
+            className="crosshair"
+            style={{
+              position: 'absolute',
+              top: `${crosshairPosition.y}px`,
+              left: `${crosshairPosition.x}px`,
+              width: '1px',
+              height: '1px',
+              backgroundColor: 'red',
+            }}
+          />
+          {depthValue !== null && (
+            <div
+              className="depth-info"
+              style={{
+                position: 'absolute',
+                top: `${crosshairPosition.y + 10}px`,
+                left: `${crosshairPosition.x + 10}px`,
+                backgroundColor: 'white',
+                padding: '5px',
+                borderRadius: '5px',
+                border: '1px solid black',
+              }}
+            >
+              Depth: {depthValue.toFixed(2)} ft
+            </div>
+          )}
         </div>
       )}
-
-      <div id="depth-render" className="w-full h-auto mt-6"></div>
     </div>
   );
 }
