@@ -152,7 +152,7 @@ export default function Home() {
                 position: 'absolute',
                 top: `${crosshairPosition.y + 10}px`,
                 left: `${crosshairPosition.x + 10}px`,
-                backgroundColor: 'white',
+                backgroundColor: 'grey',
                 padding: '5px',
                 borderRadius: '5px',
                 border: '1px solid black',
